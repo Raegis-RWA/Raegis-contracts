@@ -5771,3 +5771,144 @@ fn test_issuance_guard_reports_not_initialized_instead_of_panicking() {
     // The policy read is equally safe before initialization.
     assert!(!client.get_issuer_separation_policy().enforced);
 }
+
+// --- Transfer Restriction Consistency Tests -------------------------------------
+
+#[test]
+fn test_transfer_consistency_when_sender_non_compliant() {
+    let (env, client, admin, user1, user2) = setup();
+    env.mock_all_auths();
+
+    client.initialize(&admin);
+    client.set_asset_status(&admin, &AssetStatus::Active);
+    
+    client.set_role(&admin, &user1, &Role::AssetManager);
+    client.whitelist_user(&admin, &user1);
+    client.whitelist_user(&admin, &user2);
+    client.mint_asset(&user1, &user1, &1000);
+    
+    client.revoke_whitelist(&admin, &user1);
+    
+    let bal_user1_before = client.get_balance_of(&user1);
+    let bal_user2_before = client.get_balance_of(&user2);
+    let total_supply_before = client.get_total_supply();
+    
+    let result = client.try_transfer(&user1, &user2, &100);
+    assert_eq!(result, Err(Ok(Error::SenderNotWhitelisted)));
+    
+    assert_eq!(client.get_balance_of(&user1), bal_user1_before);
+    assert_eq!(client.get_balance_of(&user2), bal_user2_before);
+    assert_eq!(client.get_total_supply(), total_supply_before);
+}
+
+#[test]
+fn test_transfer_consistency_when_receiver_non_compliant() {
+    let (env, client, admin, user1, user2) = setup();
+    env.mock_all_auths();
+
+    client.initialize(&admin);
+    client.set_asset_status(&admin, &AssetStatus::Active);
+    
+    client.set_role(&admin, &user1, &Role::AssetManager);
+    client.whitelist_user(&admin, &user1);
+    client.whitelist_user(&admin, &user2);
+    client.mint_asset(&user1, &user1, &1000);
+    
+    client.revoke_whitelist(&admin, &user2);
+    
+    let bal_user1_before = client.get_balance_of(&user1);
+    let bal_user2_before = client.get_balance_of(&user2);
+    let total_supply_before = client.get_total_supply();
+    
+    let result = client.try_transfer(&user1, &user2, &100);
+    assert_eq!(result, Err(Ok(Error::ReceiverNotWhitelisted)));
+    
+    assert_eq!(client.get_balance_of(&user1), bal_user1_before);
+    assert_eq!(client.get_balance_of(&user2), bal_user2_before);
+    assert_eq!(client.get_total_supply(), total_supply_before);
+}
+
+#[test]
+fn test_transfer_consistency_when_asset_paused() {
+    let (env, client, admin, user1, user2) = setup();
+    env.mock_all_auths();
+
+    client.initialize(&admin);
+    client.set_asset_status(&admin, &AssetStatus::Active);
+    
+    client.set_role(&admin, &user1, &Role::AssetManager);
+    client.whitelist_user(&admin, &user1);
+    client.whitelist_user(&admin, &user2);
+    client.mint_asset(&user1, &user1, &1000);
+    
+    client.set_asset_status(&admin, &AssetStatus::Paused);
+    
+    let bal_user1_before = client.get_balance_of(&user1);
+    let bal_user2_before = client.get_balance_of(&user2);
+    let total_supply_before = client.get_total_supply();
+    
+    let result = client.try_transfer(&user1, &user2, &100);
+    assert_eq!(result, Err(Ok(Error::AssetPausedRestriction)));
+    
+    assert_eq!(client.get_balance_of(&user1), bal_user1_before);
+    assert_eq!(client.get_balance_of(&user2), bal_user2_before);
+    assert_eq!(client.get_total_supply(), total_supply_before);
+}
+
+#[test]
+fn test_transfer_consistency_when_contract_paused() {
+    let (env, client, admin, user1, user2) = setup();
+    env.mock_all_auths();
+
+    client.initialize(&admin);
+    client.set_asset_status(&admin, &AssetStatus::Active);
+    
+    client.set_role(&admin, &user1, &Role::AssetManager);
+    client.whitelist_user(&admin, &user1);
+    client.whitelist_user(&admin, &user2);
+    client.mint_asset(&user1, &user1, &1000);
+    
+    client.pause(&admin);
+    
+    let bal_user1_before = client.get_balance_of(&user1);
+    let bal_user2_before = client.get_balance_of(&user2);
+    let total_supply_before = client.get_total_supply();
+    
+    let result = client.try_transfer(&user1, &user2, &100);
+    assert_eq!(result, Err(Ok(Error::ContractPaused)));
+    
+    assert_eq!(client.get_balance_of(&user1), bal_user1_before);
+    assert_eq!(client.get_balance_of(&user2), bal_user2_before);
+    assert_eq!(client.get_total_supply(), total_supply_before);
+}
+
+#[test]
+fn test_transfer_consistency_when_asset_retired_or_blocked() {
+    let (env, client, admin, user1, user2) = setup();
+    env.mock_all_auths();
+
+    client.initialize(&admin);
+    client.set_asset_status(&admin, &AssetStatus::Active);
+    
+    client.set_role(&admin, &user1, &Role::AssetManager);
+    client.whitelist_user(&admin, &user1);
+    client.whitelist_user(&admin, &user2);
+    client.mint_asset(&user1, &user1, &1000);
+    
+    client.set_asset_status(&admin, &AssetStatus::Retired);
+    
+    let bal_user1_before = client.get_balance_of(&user1);
+    let bal_user2_before = client.get_balance_of(&user2);
+    let total_supply_before = client.get_total_supply();
+    
+    let result = client.try_transfer(&user1, &user2, &100);
+    assert_eq!(result, Err(Ok(Error::AssetRetiredRestriction)));
+    
+    assert_eq!(client.get_balance_of(&user1), bal_user1_before);
+    assert_eq!(client.get_balance_of(&user2), bal_user2_before);
+    assert_eq!(client.get_total_supply(), total_supply_before);
+    
+    client.set_asset_status(&admin, &AssetStatus::Blocked);
+    let result2 = client.try_transfer(&user1, &user2, &100);
+    assert_eq!(result2, Err(Ok(Error::AssetBlockedRestriction)));
+}
