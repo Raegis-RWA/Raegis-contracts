@@ -182,6 +182,56 @@
       ]
     },
     {
+      "id": "check-compliance-transition-allowed",
+      "description": "Pre-flight read: a ComplianceOfficer may approve an unknown address.                  The verdict comes from the same evaluation the write path enforces,                  so `allowed: true` means `set_compliance_status` would commit                  against this ledger state. Pure read — no events, no writes.",
+      "call": "check_compliance_transition",
+      "args": [
+        "compliance_officer",
+        "investor_alice",
+        "Approved"
+      ],
+      "returns": {
+        "allowed": true,
+        "caller": "GAEGCFR5CC2J5E5FVFDOJJS4TGNCBWTDMNILRHETSHDWXOXIOFWA25JU",
+        "current_status": [
+          "Unknown"
+        ],
+        "error_code": null,
+        "reason": [
+          "Allowed"
+        ],
+        "requested_status": [
+          "Approved"
+        ],
+        "user": "GAXRVA67D5NLMKP6H5IROF3IY5EMQW6AQBJLTUITGAAZUXMGY7CYO2KG"
+      }
+    },
+    {
+      "id": "check-compliance-transition-blocked-requires-admin",
+      "description": "Pre-flight read: the same ComplianceOfficer is refused for a `Blocked` address. `reason` distinguishes an admin-only freeze from a missing role even though both surface as `Unauthorized` (3000) on-chain, and `error_code` pre-resolves the code a submission would revert with.",
+      "call": "check_compliance_transition",
+      "args": [
+        "compliance_officer",
+        "investor_bob",
+        "Pending"
+      ],
+      "returns": {
+        "allowed": false,
+        "caller": "GAEGCFR5CC2J5E5FVFDOJJS4TGNCBWTDMNILRHETSHDWXOXIOFWA25JU",
+        "current_status": [
+          "Blocked"
+        ],
+        "error_code": 3000,
+        "reason": [
+          "BlockedRequiresAdmin"
+        ],
+        "requested_status": [
+          "Pending"
+        ],
+        "user": "GD4YM2BO77TT5BMWZC7SMH74GWZ5TPTKVTGPW5X6VUKFXLLD6W3XPRYN"
+      }
+    },
+    {
       "id": "get-role-of-all-actors",
       "description": "Role reads for every actor. A `#[contracttype]` unit enum is encoded on the wire as a single-element vector holding the variant name, so `Role::Admin` renders as [\"Admin\"] and an unassigned address as [\"None\"].",
       "call": "get_role_of",

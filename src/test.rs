@@ -24,6 +24,9 @@ use crate::issuer::{
     IssuanceGuard, IssuerDuty, IssuerSeparationPolicy, IssuerSeparationPolicyUpdatedEvent,
 };
 use crate::lifecycle::{AssetStatus, AssetStatusChangedEvent};
+use crate::read_helpers::{
+    OptionalAddressRead, OptionalI128Read, OptionalProtocolConfigRead, STORAGE_VERSION,
+};
 
 use crate::errors::Error;
 
@@ -98,7 +101,7 @@ fn test_mint_reverts_without_asset_manager_role() {
     // user1 has no role at all — mint should revert
     let result = client.try_mint_asset(&user1, &user2, &100);
     assert_eq!(result, Err(Ok(Error::Unauthorized)));
-    
+
     // Ensure state is preserved on wrong-role failure
     assert_eq!(client.get_total_supply(), 0);
     assert_eq!(client.get_balance_of(&user2), 0);
@@ -116,7 +119,7 @@ fn test_mint_reverts_with_compliance_officer_role() {
     // ComplianceOfficer cannot mint — only AssetManager or Admin
     let result = client.try_mint_asset(&user1, &user2, &100);
     assert_eq!(result, Err(Ok(Error::Unauthorized)));
-    
+
     // Ensure state is preserved on wrong-role failure
     assert_eq!(client.get_total_supply(), 0);
     assert_eq!(client.get_balance_of(&user2), 0);
@@ -300,7 +303,7 @@ fn test_whitelist_reverts_without_role() {
     // user2 has no role — whitelist should revert
     let result = client.try_whitelist_user(&user2, &user1);
     assert_eq!(result, Err(Ok(Error::Unauthorized)));
-    
+
     // Ensure state is preserved on wrong-role failure
     assert!(!client.is_whitelisted(&user1));
 }
@@ -316,7 +319,7 @@ fn test_whitelist_reverts_with_asset_manager_role() {
     // AssetManager cannot whitelist — only ComplianceOfficer or Admin
     let result = client.try_whitelist_user(&user2, &user1);
     assert_eq!(result, Err(Ok(Error::Unauthorized)));
-    
+
     // Ensure state is preserved on wrong-role failure
     assert!(!client.is_whitelisted(&user1));
 }
@@ -369,7 +372,7 @@ fn test_revoke_whitelist_reverts_without_role() {
     // user2 has no role
     let result = client.try_revoke_whitelist(&user2, &user1);
     assert_eq!(result, Err(Ok(Error::Unauthorized)));
-    
+
     // Ensure state is preserved on wrong-role failure
     assert!(client.is_whitelisted(&user1));
 }
@@ -399,7 +402,7 @@ fn test_set_role_reverts_for_non_admin() {
     // user1 is not admin — cannot assign roles
     let result = client.try_set_role(&user1, &user2, &Role::AssetManager);
     assert_eq!(result, Err(Ok(Error::Unauthorized)));
-    
+
     // Ensure state is preserved on wrong-role failure
     assert_eq!(client.get_role_of(&user2), Role::None);
 }
@@ -415,7 +418,7 @@ fn test_remove_role_reverts_for_non_admin() {
     // user2 is not admin — cannot revoke roles
     let result = client.try_remove_role(&user2, &user1);
     assert_eq!(result, Err(Ok(Error::Unauthorized)));
-    
+
     // Ensure state is preserved on wrong-role failure
     assert_eq!(client.get_role_of(&user1), Role::AssetManager);
 }
@@ -479,7 +482,7 @@ fn test_transfer_admin_reverts_for_non_admin() {
 
     let result = client.try_transfer_admin(&user1, &user2);
     assert_eq!(result, Err(Ok(Error::Unauthorized)));
-    
+
     // Ensure state is preserved on wrong-role failure
     assert_eq!(client.get_role_of(&admin), Role::Admin);
 }
@@ -495,7 +498,7 @@ fn test_accept_admin_reverts_for_wrong_candidate() {
     // user2 tries to accept — should revert
     let result = client.try_accept_admin(&user2);
     assert_eq!(result, Err(Ok(Error::NotPendingCandidate)));
-    
+
     // Ensure state is preserved on wrong-role failure
     assert_eq!(client.get_role_of(&admin), Role::Admin);
     assert_eq!(client.get_role_of(&user1), Role::None);
@@ -543,7 +546,7 @@ fn test_renounce_admin_reverts_for_non_admin() {
 
     let result = client.try_renounce_admin(&user1);
     assert_eq!(result, Err(Ok(Error::Unauthorized)));
-    
+
     // Ensure state is preserved on wrong-role failure
     assert_eq!(client.get_role_of(&admin), Role::Admin);
 }
@@ -1652,6 +1655,201 @@ fn test_contract_capabilities() {
     assert!(keys.contains(Symbol::new(&env, "rbac")));
 }
 
+// ─── Stable configuration read helpers ───────────────────────────────────────
+
+#[test]
+fn test_read_helpers_default_state_and_never_mutate() {
+    let (env, client, _admin, user1, _user2) = setup();
+
+    // No auth and no initialize: every helper must still answer safely.
+    let config = client.get_contract_config();
+    assert!(!config.initialized);
+    assert_eq!(config.admin, OptionalAddressRead::None);
+    assert_eq!(config.pending_admin, OptionalAddressRead::None);
+    assert_eq!(config.protocol_config.min_transfer_amount, 0);
+    assert_eq!(config.protocol_config.max_batch_size, 100);
+    assert_eq!(
+        config.pending_protocol_config,
+        OptionalProtocolConfigRead::None
+    );
+    assert_eq!(config.supply_cap, 0);
+    assert_eq!(config.pending_supply_cap, OptionalI128Read::None);
+    assert_eq!(config.holding_cap, 0);
+    assert_eq!(config.pending_holding_cap, OptionalI128Read::None);
+    assert_eq!(config.total_supply, 0);
+    assert_eq!(config.storage_version, STORAGE_VERSION);
+
+    let role = client.get_role_state(&user1);
+    assert_eq!(role.account, user1);
+    assert_eq!(role.assigned_role, Role::None);
+    assert_eq!(role.effective_role, Role::None);
+    assert_eq!(role.duties.len(), 0);
+    assert!(!role.is_admin);
+    assert!(!role.is_pending_admin);
+
+    let pause = client.get_pause_state();
+    assert!(!pause.paused);
+    assert_eq!(pause.asset_status, AssetStatus::Draft);
+    assert!(!pause.asset_active);
+    assert!(!pause.operations_enabled);
+
+    let compliance_module = client.get_compliance_module_status();
+    assert!(compliance_module.module_enabled);
+    assert_eq!(compliance_module.status_reads, CapabilityStatus::Supported);
+    assert_eq!(
+        compliance_module.lifecycle_states,
+        CapabilityStatus::Supported
+    );
+    assert_eq!(
+        compliance_module.transition_guards,
+        CapabilityStatus::Supported
+    );
+    assert_eq!(compliance_module.batch_updates, CapabilityStatus::Supported);
+    assert!(compliance_module.enforced_on_mint);
+    assert!(compliance_module.enforced_on_transfer);
+    assert!(!compliance_module.paused);
+
+    let compliance_account = client.get_compliance_account_state(&role.account);
+    assert_eq!(compliance_account.status, ComplianceStatus::Unknown);
+    assert!(!compliance_account.whitelisted);
+    assert!(!compliance_account.can_send);
+    assert!(!compliance_account.can_receive);
+
+    let asset_registry = client.get_asset_registry_status();
+    assert!(asset_registry.module_enabled);
+    assert!(!asset_registry.registered);
+    assert_eq!(asset_registry.asset_status, AssetStatus::Draft);
+    assert!(!asset_registry.metadata_configured);
+    assert_eq!(asset_registry.total_supply, 0);
+    assert_eq!(
+        asset_registry.asset_registered_event,
+        CapabilityStatus::Planned
+    );
+
+    let storage = client.get_storage_info();
+    assert_eq!(storage.storage_version, STORAGE_VERSION);
+    assert_eq!(storage.capability_schema_version, CAPABILITY_SCHEMA_VERSION);
+    assert_eq!(
+        storage.contract_version,
+        String::from_str(&env, env!("CARGO_PKG_VERSION"))
+    );
+    assert!(!storage.initialized);
+    assert_eq!(client.get_storage_version(), STORAGE_VERSION);
+
+    // Repeated reads publish no events and do not alter basic state.
+    let events_len = env.events().all().events().len();
+    let supply_before = client.get_total_supply();
+    let _ = client.get_contract_config();
+    let _ = client.get_role_state(&role.account);
+    let _ = client.get_pause_state();
+    let _ = client.get_compliance_module_status();
+    let _ = client.get_compliance_account_state(&role.account);
+    let _ = client.get_asset_registry_status();
+    let _ = client.get_storage_info();
+    assert_eq!(env.events().all().events().len(), events_len);
+    assert_eq!(client.get_total_supply(), supply_before);
+}
+
+#[test]
+fn test_read_helpers_configured_state_and_pause_visibility() {
+    let (env, client, admin, user1, user2) = setup();
+    env.mock_all_auths();
+
+    client.initialize(&admin);
+    client.set_role(&admin, &user1, &Role::ComplianceOfficer);
+    client.transfer_admin(&admin, &user2);
+    client.propose_config(
+        &admin,
+        &crate::config::ProtocolConfig {
+            min_transfer_amount: 10,
+            max_batch_size: 25,
+        },
+    );
+    client.propose_supply_cap(&admin, &1_000);
+    client.propose_holding_cap(&admin, &250);
+    client.set_asset_status(&admin, &AssetStatus::Active);
+    client.update_asset_metadata(
+        &admin,
+        &String::from_str(&env, "Aegis RWA"),
+        &String::from_str(&env, "RAEGIS"),
+        &String::from_str(&env, "ipfs://aegis"),
+    );
+    client.whitelist_user(&user1, &user2);
+    client.mint_asset(&admin, &user2, &100);
+    client.pause(&admin);
+
+    let config = client.get_contract_config();
+    assert!(config.initialized);
+    assert_eq!(config.admin, OptionalAddressRead::Some(admin.clone()));
+    assert_eq!(
+        config.pending_admin,
+        OptionalAddressRead::Some(user2.clone())
+    );
+    assert_eq!(
+        config.pending_protocol_config,
+        OptionalProtocolConfigRead::Some(crate::config::ProtocolConfig {
+            min_transfer_amount: 10,
+            max_batch_size: 25,
+        })
+    );
+    assert_eq!(config.pending_supply_cap, OptionalI128Read::Some(1_000));
+    assert_eq!(config.pending_holding_cap, OptionalI128Read::Some(250));
+    assert_eq!(config.total_supply, 100);
+
+    let admin_role = client.get_role_state(&admin);
+    assert_eq!(admin_role.assigned_role, Role::Admin);
+    assert_eq!(admin_role.effective_role, Role::Admin);
+    assert!(admin_role.duties.contains(IssuerDuty::Governance));
+    assert!(admin_role.is_admin);
+
+    let officer_role = client.get_role_state(&user1);
+    assert_eq!(officer_role.assigned_role, Role::ComplianceOfficer);
+    assert_eq!(officer_role.effective_role, Role::ComplianceOfficer);
+    assert!(officer_role.duties.contains(IssuerDuty::Compliance));
+    assert!(!officer_role.is_admin);
+
+    let candidate_role = client.get_role_state(&user2);
+    assert!(candidate_role.is_pending_admin);
+    assert_eq!(candidate_role.effective_role, Role::None);
+
+    let pause = client.get_pause_state();
+    assert!(pause.paused);
+    assert_eq!(pause.asset_status, AssetStatus::Active);
+    assert!(pause.asset_active);
+    assert!(!pause.operations_enabled);
+
+    let compliance_module = client.get_compliance_module_status();
+    assert!(compliance_module.paused);
+
+    let compliance_account = client.get_compliance_account_state(&user2);
+    assert_eq!(compliance_account.status, ComplianceStatus::Approved);
+    assert!(compliance_account.whitelisted);
+    assert!(compliance_account.can_send);
+    assert!(compliance_account.can_receive);
+
+    let asset_registry = client.get_asset_registry_status();
+    assert!(asset_registry.registered);
+    assert_eq!(asset_registry.asset_status, AssetStatus::Active);
+    assert!(asset_registry.metadata_configured);
+    assert_eq!(
+        asset_registry.metadata.symbol,
+        String::from_str(&env, "RAEGIS")
+    );
+    assert_eq!(asset_registry.total_supply, 100);
+
+    let events_len = env.events().all().events().len();
+    let balance_before = client.get_balance_of(&user2);
+    let _ = client.get_contract_config();
+    let _ = client.get_role_state(&admin);
+    let _ = client.get_pause_state();
+    let _ = client.get_compliance_module_status();
+    let _ = client.get_compliance_account_state(&user2);
+    let _ = client.get_asset_registry_status();
+    let _ = client.get_storage_info();
+    assert_eq!(env.events().all().events().len(), events_len);
+    assert_eq!(client.get_balance_of(&user2), balance_before);
+}
+
 // ─── Asset lifecycle invariants (#55) ─────────────────────────────────────────
 
 #[test]
@@ -1910,7 +2108,6 @@ fn test_holding_cap_blocks_mint_over_limit() {
     assert!(r.is_ok());
     assert_eq!(client.get_balance_of(&user2), 500);
 
-
     // Mint that would push the holder over the cap is rejected.
     let r = client.try_mint_asset(&user1, &user2, &1);
     assert!(r.is_err());
@@ -1926,7 +2123,6 @@ fn test_holding_cap_blocks_transfer_over_limit() {
     client.set_role(&admin, &user1, &Role::AssetManager);
     client.whitelist_user(&admin, &user1);
     client.whitelist_user(&admin, &user2);
-
 
     // Give user1 a balance, then cap user2's holding at 300.
     client.mint_asset(&user1, &user1, &1000);
