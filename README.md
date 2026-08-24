@@ -80,6 +80,7 @@ value-encoding rules, and the no-real-user-data guarantee.
 ## Investor Tooling
 
 - [Investor Eligibility Read Helpers](docs/investor-eligibility.md) — compliance, holding-cap, and transfer eligibility read helpers for SDKs and dashboards
+- [Configuration Read Helpers](docs/configuration-read-helpers.md) — aggregate read-only helpers for configuration, roles, compliance module status, asset registry status, pause state, and storage version
 - [Contract Capability Flags](docs/capabilities.md) — read-only capability flags describing supported modules and protocol behaviors for SDKs and dashboards
 
 - [Requirement Traceability Mapping](docs/traceability-mapping.md) — mandatory completion table format for PR acceptance criteria mapping, with status tracking and incomplete criteria handling

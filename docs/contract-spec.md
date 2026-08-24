@@ -92,6 +92,22 @@ These functions are always available, even when the contract is paused:
 * `get_total_supply(env)`: Returns the global total supply (defaults to 0).
 * `is_whitelisted(env, user)`: Returns whether an address is compliance-approved. Derived from the lifecycle — `true` only for `ComplianceStatus::Approved`. Prefer `get_compliance_status` for the full state.
 
+## Configuration Read Helpers (read_helpers.rs)
+
+Pure aggregate reads for SDK/dashboard diagnostics. They require no auth, do
+not mutate state, emit no events, and remain safe before `initialize` and while
+paused. See [`docs/configuration-read-helpers.md`](configuration-read-helpers.md)
+for field semantics and usage guidance.
+
+* `get_contract_config(env)`: Returns `ContractConfigRead` with initialization/admin state, pending admin, active/pending protocol config, active/pending supply and holding caps, total supply, and storage version.
+* `get_role_state(env, account)`: Returns `RoleReadState` with assigned/effective role, duties, admin flag, and pending-admin flag.
+* `get_pause_state(env)`: Returns `PauseReadState` with global pause, asset lifecycle status, and derived `operations_enabled`.
+* `get_compliance_module_status(env)`: Returns `ComplianceModuleStatusRead` describing compliance read/lifecycle/batch/guard support and current pause state.
+* `get_compliance_account_state(env, account)`: Returns `ComplianceAccountRead` with lifecycle status, whitelist compatibility flag, and derived send/receive booleans.
+* `get_asset_registry_status(env)`: Returns `AssetRegistryStatusRead` with single-asset registration, lifecycle, metadata, total supply, and asset-registration event status.
+* `get_storage_info(env)`: Returns `StorageVersionRead` with storage, capability-schema, and contract versions plus initialization state.
+* `get_storage_version(env)`: Returns the scalar storage layout version.
+
 ## Investor Eligibility (eligibility.rs)
 
 Pure reads that compose the checks above into single-call answers for SDK and

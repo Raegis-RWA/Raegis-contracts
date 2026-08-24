@@ -11,6 +11,7 @@ pub mod errors;
 pub mod holding;
 pub mod issuer;
 
+pub mod read_helpers;
 pub mod restrictions;
 
 pub mod lifecycle;

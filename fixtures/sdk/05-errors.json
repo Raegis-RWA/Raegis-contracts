@@ -249,8 +249,22 @@
       }
     },
     {
+      "id": "error-7002-asset-blocked-restriction-draft",
+      "description": "The asset lifecycle status is Draft (not Active), so issuance and transfers are blocked. Reported as the granular restriction code `7002`, not the reserved `6000 AssetNotActive` it superseded (see docs/error-codes.md).",
+      "call": "mint_asset",
+      "result": {
+        "ok": false,
+        "error": {
+          "type": "contract",
+          "code": 7002,
+          "name": "AssetBlockedRestriction",
+          "category": "transfer_restrictions"
+        }
+      }
+    },
+    {
       "id": "error-7000-asset-paused-restriction",
-      "description": "The asset lifecycle status is Paused, so issuance and transfers are blocked.",
+      "description": "The asset lifecycle status is Paused, so issuance and transfers are blocked. Distinct from the global contract pause (3004).",
       "call": "mint_asset",
       "result": {
         "ok": false,
@@ -329,6 +343,20 @@
           "code": 5003,
           "name": "HoldingCapExceeded",
           "category": "minting_transfers"
+        }
+      }
+    },
+    {
+      "id": "error-3007-issuance-duty-conflict",
+      "description": "Issuer separation is enforced and the caller holds both the compliance and issuance duties, so it may not issue. Recoverable: the admin can relax the policy, which is never self-locking.",
+      "call": "mint_asset",
+      "result": {
+        "ok": false,
+        "error": {
+          "type": "contract",
+          "code": 3007,
+          "name": "IssuanceDutyConflict",
+          "category": "admin_authorization"
         }
       }
     }
