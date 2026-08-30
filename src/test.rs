@@ -98,7 +98,7 @@ fn test_mint_reverts_without_asset_manager_role() {
     // user1 has no role at all — mint should revert
     let result = client.try_mint_asset(&user1, &user2, &100);
     assert_eq!(result, Err(Ok(Error::Unauthorized)));
-    
+
     // Ensure state is preserved on wrong-role failure
     assert_eq!(client.get_total_supply(), 0);
     assert_eq!(client.get_balance_of(&user2), 0);
@@ -116,7 +116,7 @@ fn test_mint_reverts_with_compliance_officer_role() {
     // ComplianceOfficer cannot mint — only AssetManager or Admin
     let result = client.try_mint_asset(&user1, &user2, &100);
     assert_eq!(result, Err(Ok(Error::Unauthorized)));
-    
+
     // Ensure state is preserved on wrong-role failure
     assert_eq!(client.get_total_supply(), 0);
     assert_eq!(client.get_balance_of(&user2), 0);
@@ -300,7 +300,7 @@ fn test_whitelist_reverts_without_role() {
     // user2 has no role — whitelist should revert
     let result = client.try_whitelist_user(&user2, &user1);
     assert_eq!(result, Err(Ok(Error::Unauthorized)));
-    
+
     // Ensure state is preserved on wrong-role failure
     assert!(!client.is_whitelisted(&user1));
 }
@@ -316,7 +316,7 @@ fn test_whitelist_reverts_with_asset_manager_role() {
     // AssetManager cannot whitelist — only ComplianceOfficer or Admin
     let result = client.try_whitelist_user(&user2, &user1);
     assert_eq!(result, Err(Ok(Error::Unauthorized)));
-    
+
     // Ensure state is preserved on wrong-role failure
     assert!(!client.is_whitelisted(&user1));
 }
@@ -369,7 +369,7 @@ fn test_revoke_whitelist_reverts_without_role() {
     // user2 has no role
     let result = client.try_revoke_whitelist(&user2, &user1);
     assert_eq!(result, Err(Ok(Error::Unauthorized)));
-    
+
     // Ensure state is preserved on wrong-role failure
     assert!(client.is_whitelisted(&user1));
 }
@@ -399,7 +399,7 @@ fn test_set_role_reverts_for_non_admin() {
     // user1 is not admin — cannot assign roles
     let result = client.try_set_role(&user1, &user2, &Role::AssetManager);
     assert_eq!(result, Err(Ok(Error::Unauthorized)));
-    
+
     // Ensure state is preserved on wrong-role failure
     assert_eq!(client.get_role_of(&user2), Role::None);
 }
@@ -415,7 +415,7 @@ fn test_remove_role_reverts_for_non_admin() {
     // user2 is not admin — cannot revoke roles
     let result = client.try_remove_role(&user2, &user1);
     assert_eq!(result, Err(Ok(Error::Unauthorized)));
-    
+
     // Ensure state is preserved on wrong-role failure
     assert_eq!(client.get_role_of(&user1), Role::AssetManager);
 }
@@ -479,7 +479,7 @@ fn test_transfer_admin_reverts_for_non_admin() {
 
     let result = client.try_transfer_admin(&user1, &user2);
     assert_eq!(result, Err(Ok(Error::Unauthorized)));
-    
+
     // Ensure state is preserved on wrong-role failure
     assert_eq!(client.get_role_of(&admin), Role::Admin);
 }
@@ -495,7 +495,7 @@ fn test_accept_admin_reverts_for_wrong_candidate() {
     // user2 tries to accept — should revert
     let result = client.try_accept_admin(&user2);
     assert_eq!(result, Err(Ok(Error::NotPendingCandidate)));
-    
+
     // Ensure state is preserved on wrong-role failure
     assert_eq!(client.get_role_of(&admin), Role::Admin);
     assert_eq!(client.get_role_of(&user1), Role::None);
@@ -543,7 +543,7 @@ fn test_renounce_admin_reverts_for_non_admin() {
 
     let result = client.try_renounce_admin(&user1);
     assert_eq!(result, Err(Ok(Error::Unauthorized)));
-    
+
     // Ensure state is preserved on wrong-role failure
     assert_eq!(client.get_role_of(&admin), Role::Admin);
 }
@@ -1910,7 +1910,6 @@ fn test_holding_cap_blocks_mint_over_limit() {
     assert!(r.is_ok());
     assert_eq!(client.get_balance_of(&user2), 500);
 
-
     // Mint that would push the holder over the cap is rejected.
     let r = client.try_mint_asset(&user1, &user2, &1);
     assert!(r.is_err());
@@ -1926,7 +1925,6 @@ fn test_holding_cap_blocks_transfer_over_limit() {
     client.set_role(&admin, &user1, &Role::AssetManager);
     client.whitelist_user(&admin, &user1);
     client.whitelist_user(&admin, &user2);
-
 
     // Give user1 a balance, then cap user2's holding at 300.
     client.mint_asset(&user1, &user1, &1000);
@@ -5770,4 +5768,177 @@ fn test_issuance_guard_reports_not_initialized_instead_of_panicking() {
     assert_eq!(check.caller_role, Role::None);
     // The policy read is equally safe before initialization.
     assert!(!client.get_issuer_separation_policy().enforced);
+}
+
+#[test]
+fn test_transfer_reverts_when_sender_blocked() {
+    let (env, client, admin, user1, user2) = setup();
+    env.mock_all_auths();
+    client.initialize(&admin);
+    client.set_asset_status(&admin, &AssetStatus::Active);
+
+    // Whitelist and mint to sender
+    client.set_role(&admin, &admin, &Role::AssetManager);
+    client.whitelist_user(&admin, &user1);
+    client.whitelist_user(&admin, &user2);
+    client.mint_asset(&admin, &user1, &100);
+
+    // Block sender
+    client.set_compliance_status(&admin, &user1, &ComplianceStatus::Blocked);
+
+    let bal_before = client.balance(&user1);
+
+    let result = client.try_transfer(&user1, &user2, &50);
+    assert_eq!(result, Err(Ok(Error::SenderNotWhitelisted))); // Or maybe it gives SenderBlocked? Wait, the issue says restrictions.rs returns SenderNotCompliant -> SenderNotWhitelisted. Wait, we should check `Error::SenderNotWhitelisted`. Let's just match what `try_transfer` returns.
+
+    let bal_after = client.balance(&user1);
+    assert_eq!(bal_before, bal_after, "State must remain consistent");
+}
+
+#[test]
+fn test_transfer_reverts_when_sender_pending() {
+    let (env, client, admin, user1, user2) = setup();
+    env.mock_all_auths();
+    client.initialize(&admin);
+    client.set_asset_status(&admin, &AssetStatus::Active);
+
+    client.set_role(&admin, &admin, &Role::AssetManager);
+    client.whitelist_user(&admin, &user1);
+    client.whitelist_user(&admin, &user2);
+    client.mint_asset(&admin, &user1, &100);
+
+    // Pending sender
+    client.set_compliance_status(&admin, &user1, &ComplianceStatus::Pending);
+
+    let bal_before = client.balance(&user1);
+
+    let result = client.try_transfer(&user1, &user2, &50);
+    assert_eq!(result, Err(Ok(Error::SenderNotWhitelisted)));
+
+    let bal_after = client.balance(&user1);
+    assert_eq!(bal_before, bal_after, "State must remain consistent");
+}
+
+#[test]
+fn test_transfer_reverts_when_receiver_blocked() {
+    let (env, client, admin, user1, user2) = setup();
+    env.mock_all_auths();
+    client.initialize(&admin);
+    client.set_asset_status(&admin, &AssetStatus::Active);
+
+    client.set_role(&admin, &admin, &Role::AssetManager);
+    client.whitelist_user(&admin, &user1);
+    client.whitelist_user(&admin, &user2);
+    client.mint_asset(&admin, &user1, &100);
+
+    // Block receiver
+    client.set_compliance_status(&admin, &user2, &ComplianceStatus::Blocked);
+
+    let bal_before = client.balance(&user1);
+
+    let result = client.try_transfer(&user1, &user2, &50);
+    assert_eq!(result, Err(Ok(Error::ReceiverNotWhitelisted)));
+
+    assert_eq!(
+        bal_before,
+        client.balance(&user1),
+        "State must remain consistent"
+    );
+}
+
+#[test]
+fn test_transfer_reverts_when_asset_paused() {
+    let (env, client, admin, user1, user2) = setup();
+    env.mock_all_auths();
+    client.initialize(&admin);
+
+    client.set_role(&admin, &admin, &Role::AssetManager);
+    client.whitelist_user(&admin, &user1);
+    client.whitelist_user(&admin, &user2);
+
+    // Set to Active then mint, then pause
+    client.set_asset_status(&admin, &AssetStatus::Active);
+    client.mint_asset(&admin, &user1, &100);
+    client.set_asset_status(&admin, &AssetStatus::Paused);
+
+    let bal_before = client.balance(&user1);
+    let result = client.try_transfer(&user1, &user2, &50);
+    assert_eq!(result, Err(Ok(Error::AssetPausedRestriction)));
+    assert_eq!(
+        bal_before,
+        client.balance(&user1),
+        "State must remain consistent"
+    );
+}
+
+#[test]
+fn test_transfer_reverts_when_asset_restricted() {
+    let (env, client, admin, user1, user2) = setup();
+    env.mock_all_auths();
+    client.initialize(&admin);
+
+    client.set_role(&admin, &admin, &Role::AssetManager);
+    client.whitelist_user(&admin, &user1);
+    client.whitelist_user(&admin, &user2);
+
+    client.set_asset_status(&admin, &AssetStatus::Active);
+    client.mint_asset(&admin, &user1, &100);
+    client.set_asset_status(&admin, &AssetStatus::Blocked);
+
+    let bal_before = client.balance(&user1);
+    let result = client.try_transfer(&user1, &user2, &50);
+    assert_eq!(result, Err(Ok(Error::AssetBlockedRestriction)));
+    assert_eq!(
+        bal_before,
+        client.balance(&user1),
+        "State must remain consistent"
+    );
+}
+
+#[test]
+fn test_transfer_reverts_when_contract_paused() {
+    let (env, client, admin, user1, user2) = setup();
+    env.mock_all_auths();
+    client.initialize(&admin);
+
+    client.set_role(&admin, &admin, &Role::AssetManager);
+    client.whitelist_user(&admin, &user1);
+    client.whitelist_user(&admin, &user2);
+
+    client.set_asset_status(&admin, &AssetStatus::Active);
+    client.mint_asset(&admin, &user1, &100);
+
+    client.pause(&admin); // Unauthorised transfer states
+
+    let bal_before = client.balance(&user1);
+    let result = client.try_transfer(&user1, &user2, &50);
+    assert_eq!(result, Err(Ok(Error::ContractPaused)));
+    assert_eq!(
+        bal_before,
+        client.balance(&user1),
+        "State must remain consistent"
+    );
+}
+
+#[test]
+fn test_transfer_succeeds() {
+    let (env, client, admin, user1, user2) = setup();
+    env.mock_all_auths();
+    client.initialize(&admin);
+
+    client.set_role(&admin, &admin, &Role::AssetManager);
+    client.whitelist_user(&admin, &user1);
+    client.whitelist_user(&admin, &user2);
+
+    client.set_asset_status(&admin, &AssetStatus::Active);
+    client.mint_asset(&admin, &user1, &100);
+
+    let bal_before_sender = client.balance(&user1);
+    let bal_before_receiver = client.balance(&user2);
+
+    let result = client.try_transfer(&user1, &user2, &50);
+    assert!(result.is_ok());
+
+    assert_eq!(client.balance(&user1), bal_before_sender - 50);
+    assert_eq!(client.balance(&user2), bal_before_receiver + 50);
 }
