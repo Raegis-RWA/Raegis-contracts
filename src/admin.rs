@@ -26,6 +26,14 @@ pub fn require_not_paused(env: &Env) {
     }
 }
 
+/// Returns `true` if secondary market transfers are specifically paused.
+pub fn is_transfers_paused(env: &Env) -> bool {
+    env.storage()
+        .instance()
+        .get(&DataKey::IsPaused)
+        .unwrap_or(false)
+}
+
 // ─── Events ───────────────────────────────────────────────────────────────────
 
 #[contracttype]
@@ -67,6 +75,18 @@ pub struct ContractPausedEvent {
 #[contracttype]
 #[derive(Clone, Debug)]
 pub struct ContractUnpausedEvent {
+    pub admin: Address,
+}
+
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct TransfersPausedEvent {
+    pub admin: Address,
+}
+
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct TransfersResumedEvent {
     pub admin: Address,
 }
 
@@ -335,4 +355,50 @@ impl AegisContract {
 
         Ok(())
     }
+
+    /// Returns whether secondary market transfers are specifically paused.
+    pub fn is_transfers_paused(env: Env) -> bool {
+        is_transfers_paused(&env)
+    }
+
+    /// Pauses all secondary market transfers (emergency circuit breaker).
+    /// Requires admin authentication.
+    pub fn pause_transfers(env: Env, admin: Address) -> Result<(), Error> {
+        admin.require_auth();
+        if admin != get_admin(&env) {
+            return Err(Error::Unauthorized);
+        }
+
+        if is_transfers_paused(&env) {
+            return Err(Error::AlreadyPaused);
+        }
+
+        env.storage().instance().set(&DataKey::IsPaused, &true);
+
+        env.events()
+            .publish(("transfers_paused",), TransfersPausedEvent { admin });
+
+        Ok(())
+    }
+
+    /// Resumes secondary market transfers.
+    /// Requires admin authentication.
+    pub fn resume_transfers(env: Env, admin: Address) -> Result<(), Error> {
+        admin.require_auth();
+        if admin != get_admin(&env) {
+            return Err(Error::Unauthorized);
+        }
+
+        if !is_transfers_paused(&env) {
+            return Err(Error::NotPaused);
+        }
+
+        env.storage().instance().set(&DataKey::IsPaused, &false);
+
+        env.events()
+            .publish(("transfers_resumed",), TransfersResumedEvent { admin });
+
+        Ok(())
+    }
 }
+
