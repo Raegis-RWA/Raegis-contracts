@@ -636,6 +636,110 @@ fn test_pause_reverts_when_already_paused() {
     assert_eq!(result, Err(Ok(Error::AlreadyPaused)));
 }
 
+// ─── Pause Transfers: Emergency Circuit Breaker (Issue #2) ───────────────────
+
+#[test]
+fn test_pause_transfers_succeeds_for_admin() {
+    let (env, client, admin, _user1, _user2) = setup();
+    env.mock_all_auths();
+
+    client.initialize(&admin);
+    assert!(!client.is_transfers_paused());
+
+    let result = client.try_pause_transfers(&admin);
+    assert!(result.is_ok());
+    assert!(client.is_transfers_paused());
+}
+
+#[test]
+fn test_pause_transfers_reverts_for_non_admin() {
+    let (env, client, admin, user1, _user2) = setup();
+    env.mock_all_auths();
+
+    client.initialize(&admin);
+
+    let result = client.try_pause_transfers(&user1);
+    assert_eq!(result, Err(Ok(Error::Unauthorized)));
+    assert!(!client.is_transfers_paused());
+}
+
+#[test]
+fn test_pause_transfers_reverts_when_already_paused() {
+    let (env, client, admin, _user1, _user2) = setup();
+    env.mock_all_auths();
+
+    client.initialize(&admin);
+    client.pause_transfers(&admin);
+
+    let result = client.try_pause_transfers(&admin);
+    assert_eq!(result, Err(Ok(Error::AlreadyPaused)));
+}
+
+#[test]
+fn test_resume_transfers_succeeds_for_admin() {
+    let (env, client, admin, _user1, _user2) = setup();
+    env.mock_all_auths();
+
+    client.initialize(&admin);
+    client.pause_transfers(&admin);
+    assert!(client.is_transfers_paused());
+
+    let result = client.try_resume_transfers(&admin);
+    assert!(result.is_ok());
+    assert!(!client.is_transfers_paused());
+}
+
+#[test]
+fn test_resume_transfers_reverts_when_not_paused() {
+    let (env, client, admin, _user1, _user2) = setup();
+    env.mock_all_auths();
+
+    client.initialize(&admin);
+
+    let result = client.try_resume_transfers(&admin);
+    assert_eq!(result, Err(Ok(Error::NotPaused)));
+}
+
+#[test]
+fn test_transfer_blocked_and_mint_allowed_when_transfers_paused() {
+    let (env, client, admin, user1, user2) = setup();
+    env.mock_all_auths();
+
+    client.initialize(&admin);
+    client.set_asset_status(&admin, &AssetStatus::Active);
+    client.set_role(&admin, &user1, &Role::ComplianceOfficer);
+    client.set_role(&admin, &user2, &Role::AssetManager);
+    client.whitelist_user(&user1, &user1);
+    client.whitelist_user(&user1, &user2);
+
+    // Initial mint works
+    client.mint_asset(&user2, &user1, &1000);
+    assert_eq!(client.get_balance_of(&user1), 1000);
+
+    // Pause transfers specifically
+    client.pause_transfers(&admin);
+    assert!(client.is_transfers_paused());
+
+    // Transfers are blocked
+    let transfer_res = client.try_transfer(&user1, &user2, &100);
+    assert_eq!(transfer_res, Err(Ok(Error::ContractPaused)));
+    assert_eq!(client.get_balance_of(&user1), 1000);
+
+    // Mint is STILL allowed while transfers are paused (Issue #2 requirement)
+    let mint_res = client.try_mint_asset(&user2, &user1, &500);
+    assert!(mint_res.is_ok());
+    assert_eq!(client.get_balance_of(&user1), 1500);
+
+    // Resume transfers restores transfer functionality
+    client.resume_transfers(&admin);
+    assert!(!client.is_transfers_paused());
+
+    let transfer_res2 = client.try_transfer(&user1, &user2, &200);
+    assert!(transfer_res2.is_ok());
+    assert_eq!(client.get_balance_of(&user1), 1300);
+    assert_eq!(client.get_balance_of(&user2), 200);
+}
+
 #[test]
 fn test_unpause_reverts_for_non_admin() {
     let (env, client, admin, user1, _user2) = setup();

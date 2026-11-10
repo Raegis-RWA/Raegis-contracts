@@ -5,7 +5,7 @@
 #![allow(deprecated)]
 use soroban_sdk::{contractimpl, contracttype, Address, Env, String};
 
-use crate::admin::{require_not_paused, require_role};
+use crate::admin::{is_transfers_paused, require_not_paused, require_role};
 use crate::compliance;
 use crate::holding;
 use crate::issuer::require_issuance_authority;
@@ -268,6 +268,9 @@ impl AegisContract {
     /// Blocked when the contract is paused.
     pub fn transfer(env: Env, from: Address, to: Address, amount: i128) -> Result<(), Error> {
         require_not_paused(&env);
+        if is_transfers_paused(&env) {
+            return Err(Error::ContractPaused);
+        }
         from.require_auth();
         if amount <= 0 {
             return Err(Error::InvalidAmount);

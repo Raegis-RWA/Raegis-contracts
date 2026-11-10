@@ -82,6 +82,8 @@ pub enum DataKey {
     /// Whether the contract is paused. If `true`, all state-changing
     /// operations (minting, transfers, compliance) are blocked.
     Paused,
+    /// Whether secondary market transfers are paused via the emergency circuit breaker (`pause_transfers`).
+    IsPaused,
     /// The currently active global supply cap. A value of `0` means
     /// "no cap enforced" (unbounded minting, subject to whitelist).
     SupplyCap,
